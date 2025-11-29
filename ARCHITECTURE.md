@@ -11,15 +11,15 @@
 
 ```mermaid
 graph LR
-    User((User / Timer)) -->|Msg| Update
-    subgraph Elmish Loop
-        Update -- Change State --> Model
+    User(("User / Timer")) -->|Msg| Update
+    subgraph "Elmish Loop"
+        Update -- "Change State" --> Model
         Model -->|State| View
         View -->|Dispatch| Update
     end
     Update -->|Cmd| Effect[Side Effects]
-    Effect -->|Async Msg| Update
-    View -->|Render| Screen[UI Window]
+    Effect -->|"Async Msg"| Update
+    View -->|Render| Screen["UI Window"]
 ```
 
 ## ファイル構成
@@ -49,7 +49,7 @@ classDiagram
         <<Union>>
         +Settings(GameConfig)
         +InGame(GameState)
-        +ColorPicker(pid, color, config)
+        +ColorPicker
     }
 
     class GameConfig {
@@ -113,24 +113,24 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    Start([Player Clicks Line]) --> Check{Valid Move?}
-    Check -- No (Existing Line) --> Ignore([Ignore])
+    Start([Player Clicks Line]) --> Check{"Valid Move?"}
+    Check -- "No (Existing Line)" --> Ignore([Ignore])
     Check -- Yes --> UpdateLines[Update Lines Map]
-    UpdateLines --> BoxCheck{Box Completed?}
+    UpdateLines --> BoxCheck{"Box Completed?"}
     
     BoxCheck -- No --> NextTurn[Next Player]
     
-    BoxCheck -- Yes --> MineCheck{Is Mine?}
+    BoxCheck -- Yes --> MineCheck{"Is Mine?"}
     
-    MineCheck -- Yes (BOOM) --> Explode[Add to ExplodedPlayers]
-    Explode --> CheckSurvivors{Survivors > 1?}
-    CheckSurvivors -- Yes --> NextTurnMine[Next Survivor's Turn]
+    MineCheck -- "Yes (BOOM)" --> Explode[Add to ExplodedPlayers]
+    Explode --> CheckSurvivors{"Survivors > 1?"}
+    CheckSurvivors -- Yes --> NextTurnMine["Next Survivor's Turn"]
     CheckSurvivors -- No --> GameEnd([Game Over])
     
-    MineCheck -- No (Safe) --> Score[Update Score]
-    Score --> GameEndCheck{All Boxes Filled?}
+    MineCheck -- "No (Safe)" --> Score[Update Score]
+    Score --> GameEndCheck{"All Boxes Filled?"}
     GameEndCheck -- Yes --> GameEnd
-    GameEndCheck -- No --> SameTurn[Same Player's Turn]
+    GameEndCheck -- No --> SameTurn["Same Player's Turn"]
 ```
 
 ## ヒットテスト（クリック判定）
@@ -139,10 +139,10 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Click((Mouse Click)) --> GetPos[Get Coordinates (X, Y)]
+    Click((Mouse Click)) --> GetPos["Get Coordinates (X, Y)"]
     GetPos --> Loop[Loop All Potential Lines]
     Loop --> Calc[Calculate Distance to Line Center]
-    Calc --> Threshold{Distance < 15px?}
+    Calc --> Threshold{"Distance < 15px?"}
     Threshold -- Yes --> Hit[Line Selected]
     Threshold -- No --> Continue[Check Next Line]
 ```
