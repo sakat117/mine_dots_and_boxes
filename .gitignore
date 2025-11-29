@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# .NET / F#
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.pdb
+
+# OS / Misc
+.DS_Store
+Thumbs.db
+.gemini/
