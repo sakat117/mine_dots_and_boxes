@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "dgSpecHash": "lAE2ZqB2gSLkfusViBC02HgemrmgP7Bj6FRk+wTbyGglLubMi3v+jiOxaKuVLv9dZTHLug7qSdgET1b6jgYbcg==",
+  "success": true,
+  "projectFilePath": "/home/sakata/mine_dots_and_boxes/MineDotsAndBoxesFs/MineDotsAndBoxesFs.fsproj",
+  "expectedPackageFiles": [
+    "/home/sakata/.nuget/packages/fsharp.core/8.0.102/fsharp.core.8.0.102.nupkg.sha512",
+    "/home/sakata/.nuget/packages/monogame.framework.desktopgl/3.8.4.1/monogame.framework.desktopgl.3.8.4.1.nupkg.sha512",
+    "/home/sakata/.nuget/packages/monogame.library.openal/1.24.3.2/monogame.library.openal.1.24.3.2.nupkg.sha512",
+    "/home/sakata/.nuget/packages/monogame.library.sdl/2.32.2.1/monogame.library.sdl.2.32.2.1.nupkg.sha512",
+    "/home/sakata/.nuget/packages/nvorbis/0.10.4/nvorbis.0.10.4.nupkg.sha512",
+    "/home/sakata/.nuget/packages/system.memory/4.5.3/system.memory.4.5.3.nupkg.sha512",
+    "/home/sakata/.nuget/packages/system.valuetuple/4.5.0/system.valuetuple.4.5.0.nupkg.sha512"
+  ],
+  "logs": []
+}
