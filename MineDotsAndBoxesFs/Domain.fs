@@ -24,6 +24,7 @@ type GameConfig = {
     Rows: int
     Cols: int
     PlayerCount: int
+    MineCount: int
     PlayerColors: Color[]
     // Visual settings
     LineThickness: int
@@ -35,6 +36,8 @@ type GameState = {
     Config: GameConfig
     Lines: Map<LinePosition, GamePlayerIndex> // Tracks drawn lines and who drew them
     Boxes: Map<Position, GamePlayerIndex>     // Tracks completed boxes and who owns them
+    Mines: Set<Position>                      // Positions of mines
+    ExplodedPlayers: Set<GamePlayerIndex>     // Players who triggered a mine
     CurrentTurn: GamePlayerIndex
     Scores: Map<GamePlayerIndex, int>
     IsGameOver: bool

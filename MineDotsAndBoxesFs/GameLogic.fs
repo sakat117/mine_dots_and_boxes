@@ -1,12 +1,23 @@
 module MineDotsAndBoxesFs.GameLogic
 
 open MineDotsAndBoxesFs.Domain
-open Microsoft.Xna.Framework
+open System
 
 // --- Helpers ---
 
-let getNextPlayer (current: GamePlayerIndex) (totalPlayers: int) =
-    (current + 1) % totalPlayers
+// Get next player, skipping exploded ones
+let getNextPlayer (current: GamePlayerIndex) (totalPlayers: int) (exploded: Set<GamePlayerIndex>) =
+    let rec findNext p =
+        let next = (p + 1) % totalPlayers
+        if next = current then None // Should not happen unless everyone exploded?
+        elif exploded.Contains next then findNext next
+        else Some next
+    
+    // If everyone else exploded, we might just stay current or handle game over elsewhere
+    // Here we just assume there is at least one survivor or game ends
+    match findNext current with
+    | Some p -> p
+    | None -> current 
 
 // Initialize a new game
 let initGame (config: GameConfig) : GameState =
@@ -16,10 +27,28 @@ let initGame (config: GameConfig) : GameState =
         |> List.map (fun p -> (p, 0)) 
         |> Map.ofList
 
+    // Place Mines Randomly
+    let rnd = Random()
+    let totalBoxes = config.Rows * config.Cols
+    // Generate all positions
+    let allPositions = 
+        [ for r in 0 .. config.Rows - 1 do
+            for c in 0 .. config.Cols - 1 do
+                yield { Row = r; Col = c } ]
+    
+    // Shuffle and take MineCount
+    let mines = 
+        allPositions
+        |> List.sortBy (fun _ -> rnd.Next())
+        |> List.take (Math.Min(config.MineCount, totalBoxes))
+        |> Set.ofList
+
     {
         Config = config
         Lines = Map.empty
         Boxes = Map.empty
+        Mines = mines
+        ExplodedPlayers = Set.empty
         CurrentTurn = 0 // Player 0 starts
         Scores = initialScores
         IsGameOver = false
@@ -56,8 +85,6 @@ let findNewlyCompletedBoxes (lines: Map<LinePosition, GamePlayerIndex>) (newLine
             ]
     
     // Filter boxes that are within grid bounds and are now fully completed
-    // Note: Grid of boxes is size Rows x Cols. 
-    // The dots grid is (Rows+1) x (Cols+1).
     potentialBoxes
     |> List.filter (fun p -> p.Row >= 0 && p.Row < rows && p.Col >= 0 && p.Col < cols)
     |> List.filter (fun p -> isBoxCompleted lines p)
@@ -65,7 +92,12 @@ let findNewlyCompletedBoxes (lines: Map<LinePosition, GamePlayerIndex>) (newLine
 
 // Update scores and game over status
 let updateGameStatus (state: GameState) : GameState =
-    // Recalculate scores
+    // Recalculate scores (only for survivors?)
+    // Survivors get points for boxes they own. Exploded players keep 0 or stay as is.
+    let survivors = 
+        [0 .. state.Config.PlayerCount - 1]
+        |> List.filter (fun p -> not (state.ExplodedPlayers.Contains p))
+        
     let newScores = 
         [0 .. state.Config.PlayerCount - 1]
         |> List.map (fun pid -> 
@@ -76,16 +108,36 @@ let updateGameStatus (state: GameState) : GameState =
     let totalBoxes = state.Config.Rows * state.Config.Cols
     let currentTotalScore = newScores |> Map.fold (fun acc _ s -> acc + s) 0
     
-    let isOver = currentTotalScore = totalBoxes
+    // Game Over conditions:
+    // 1. All boxes filled
+    // 2. Only 1 survivor left (if started with > 1)
+    // 3. All players exploded (draw?)
     
+    let survivorCount = survivors.Length
+    let isLastManStanding = state.Config.PlayerCount > 1 && survivorCount <= 1
+    let allBoxesFilled = currentTotalScore = totalBoxes // Note: boxes owned by exploded players still count as filled?
+    // Actually if a player explodes, do they "own" the box? 
+    // Current logic assigns box to player BEFORE checking explosion. 
+    // So yes, box is filled.
+    
+    // However, if a player explodes, maybe we want the game to end immediately if they were the last opponent?
+    
+    let isOver = allBoxesFilled || isLastManStanding || survivorCount = 0
+
     let winner = 
         if isOver then
-            // Find player with max score
-            newScores 
-            |> Map.toList 
-            |> List.sortByDescending snd
-            |> List.tryHead
-            |> Option.map fst
+            if survivorCount = 1 then 
+                Some survivors.Head
+            elif survivorCount = 0 then
+                None // Everyone died
+            else
+                // Score based win
+                newScores 
+                |> Map.toList 
+                |> List.filter (fun (p, _) -> not (state.ExplodedPlayers.Contains p)) // Only survivors can win?
+                |> List.sortByDescending snd
+                |> List.tryHead
+                |> Option.map fst
         else None
 
     { state with 
@@ -107,20 +159,39 @@ let tryPlaceLine (state: GameState) (linePos: LinePosition) : GameState =
         
         let boxesCompleted = not newBoxesList.IsEmpty
         
-        // 3. Update ownership of new boxes
+        // 3. Check for Mines in newly completed boxes
+        let triggeredMines = 
+            newBoxesList 
+            |> List.exists (fun p -> state.Mines.Contains p)
+            
+        let mutable currentExploded = state.ExplodedPlayers
+        if triggeredMines then
+            currentExploded <- currentExploded.Add state.CurrentTurn
+        
+        // 4. Update ownership of new boxes
+        // Even if exploded, assign box to them for now (to mark it as filled)
         let newBoxes = 
             newBoxesList 
             |> List.fold (fun acc boxPos -> Map.add boxPos state.CurrentTurn acc) state.Boxes
 
-        // 4. Determine next turn (same player if box completed, else next)
+        // 5. Determine next turn 
+        // - If player exploded, force next player.
+        // - If box completed and NOT exploded, same player.
+        // - Else next player.
+        
         let nextPlayer = 
-            if boxesCompleted then state.CurrentTurn 
-            else getNextPlayer state.CurrentTurn state.Config.PlayerCount
+            if triggeredMines then 
+                getNextPlayer state.CurrentTurn state.Config.PlayerCount currentExploded
+            elif boxesCompleted then 
+                state.CurrentTurn 
+            else 
+                getNextPlayer state.CurrentTurn state.Config.PlayerCount currentExploded
 
         let newState = { state with 
                             Lines = newLines
                             Boxes = newBoxes
+                            ExplodedPlayers = currentExploded
                             CurrentTurn = nextPlayer }
         
-        // 5. Update scores and check game over
+        // 6. Update scores and check game over
         updateGameStatus newState
