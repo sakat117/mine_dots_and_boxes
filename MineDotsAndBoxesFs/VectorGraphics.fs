@@ -60,6 +60,7 @@ let drawChar (batch: SpriteBatch) (pixel: Texture2D) (code: int) (pos: Vector2) 
         | 14 -> [[tl; tr; br; bl; tl]] // D (Same as 0 for now, or curve it? square is fine)
         | 15 -> [[bl; tl; tr; mr; ml]; [Vector2(w*0.2f, h/2.0f); br]] // R (Loop + Leg)
         | 16 -> [[bl; tl; tr; br]; [ml; mr]] // A
+        | 17 -> [[tl; br]; [tr; bl]] // X
         | _ -> [] 
 
     for strip in segments do
@@ -91,6 +92,7 @@ let drawText (batch: SpriteBatch) (pixel: Texture2D) (text: string) (pos: Vector
             | 'D' -> 14
             | 'R' -> 15
             | 'A' -> 16
+            | 'X' -> 17
             | d when Char.IsDigit d -> int (Char.GetNumericValue d)
             | _ -> -1
             
@@ -101,7 +103,7 @@ let drawText (batch: SpriteBatch) (pixel: Texture2D) (text: string) (pos: Vector
 
 
 // Draw a generic symbol
-type Symbol = Plus | Minus | Play | Back
+type Symbol = Plus | Minus | Play | Back | Skull
 
 let drawSymbol (batch: SpriteBatch) (pixel: Texture2D) (symbol: Symbol) (rect: Rectangle) (thick: int) (color: Color) =
     let cX = float32 rect.X + float32 rect.Width / 2.0f
@@ -109,6 +111,33 @@ let drawSymbol (batch: SpriteBatch) (pixel: Texture2D) (symbol: Symbol) (rect: R
     let s = float32 (Math.Min(rect.Width, rect.Height)) * 0.6f // Scale
     
     match symbol with
+    | Skull ->
+        // Skull shape
+        let headTop = Vector2(cX - s/2.0f, cY - s/2.0f)
+        let headBot = Vector2(cX + s/2.0f, cY)
+        // Boxy skull
+        let tl = Vector2(cX - s*0.4f, cY - s*0.4f)
+        let tr = Vector2(cX + s*0.4f, cY - s*0.4f)
+        let bl = Vector2(cX - s*0.4f, cY + s*0.1f)
+        let br = Vector2(cX + s*0.4f, cY + s*0.1f)
+        drawStrip batch pixel [tl; tr; br; bl; tl] thick color
+        // Crossbones or teeth? Let's do teeth
+        let t1 = Vector2(cX - s*0.2f, cY + s*0.1f)
+        let t2 = Vector2(cX - s*0.2f, cY + s*0.4f)
+        let t3 = Vector2(cX + s*0.2f, cY + s*0.1f)
+        let t4 = Vector2(cX + s*0.2f, cY + s*0.4f)
+        drawStrip batch pixel [t1; t2] thick color
+        drawStrip batch pixel [t3; t4] thick color
+        // Eyes
+        let el = Vector2(cX - s*0.15f, cY - s*0.15f)
+        let er = Vector2(cX + s*0.15f, cY - s*0.15f)
+        // Just dots for eyes? We can't draw filled rects easily here with strips.
+        // Draw small X for eyes
+        drawStrip batch pixel [el - Vector2(2.0f, 2.0f); el + Vector2(2.0f, 2.0f)] 2 color
+        drawStrip batch pixel [el - Vector2(2.0f, -2.0f); el + Vector2(2.0f, -2.0f)] 2 color
+        drawStrip batch pixel [er - Vector2(2.0f, 2.0f); er + Vector2(2.0f, 2.0f)] 2 color
+        drawStrip batch pixel [er - Vector2(2.0f, -2.0f); er + Vector2(2.0f, -2.0f)] 2 color
+
     | Plus ->
         drawStrip batch pixel [Vector2(cX - s/2.0f, cY); Vector2(cX + s/2.0f, cY)] thick color
         drawStrip batch pixel [Vector2(cX, cY - s/2.0f); Vector2(cX, cY + s/2.0f)] thick color

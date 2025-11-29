@@ -28,6 +28,7 @@ type DotsAndBoxesGame() as this =
         Rows = 3
         Cols = 3
         PlayerCount = 2
+        MineCount = 1 // Default 1 mine
         PlayerColors = Array.copy availableColors // Initialize with default palette
         LineThickness = 5
         DotRadius = 8
@@ -72,7 +73,7 @@ type DotsAndBoxesGame() as this =
         let mouse = Mouse.GetState()
         let viewport = this.GraphicsDevice.Viewport
         let cX = viewport.Width / 2
-        let startY = viewport.Height / 2 - 150
+        let startY = viewport.Height / 2 - 180 // Moved up more to fit Mine control
         
         let getRowY index = startY + index * 70
         let getMinusRect y = new Rectangle(cX - 150, y, 60, 60)
@@ -99,8 +100,16 @@ type DotsAndBoxesGame() as this =
         if this.IsClicked(getPlusRect plY, mouse) then
             currentScreen <- Settings { config with PlayerCount = Math.Min(8, config.PlayerCount + 1) }
 
-        // 4. Color Pickers
-        let colorStartY = getRowY 3 + 20
+        // 4. Mine Count Control
+        let mnY = getRowY 3
+        let maxMines = (config.Rows * config.Cols) / 2 // Cap mines at half grid
+        if this.IsClicked(getMinusRect mnY, mouse) then
+            currentScreen <- Settings { config with MineCount = Math.Max(0, config.MineCount - 1) }
+        if this.IsClicked(getPlusRect mnY, mouse) then
+            currentScreen <- Settings { config with MineCount = Math.Min(maxMines, config.MineCount + 1) }
+
+        // 5. Color Pickers
+        let colorStartY = getRowY 4 + 20
         let btnSize = 50
         let spacing = 10
         
@@ -171,7 +180,7 @@ type DotsAndBoxesGame() as this =
         
         let newColor = Color(int r, int g, int b)
         
-        // UI Buttons (RESET Removed)
+        // UI Buttons
         let btnY = startY + spacing * 3 + 20
         let okBtn = new Rectangle(cX - 110, btnY, 100, 50)
         let cancelBtn = new Rectangle(cX + 10, btnY, 100, 50)
@@ -186,7 +195,7 @@ type DotsAndBoxesGame() as this =
             // Discard
             currentScreen <- Settings config
             
-        // Only update screen state if color changed (to avoid flickering or stack overflow if we were recursively calling, but we use state machine so it's fine)
+        // Only update screen state if color changed
         match currentScreen with
         | ColorPicker(_, c, _) when c <> newColor -> 
              currentScreen <- ColorPicker(targetPid, newColor, config)
@@ -252,7 +261,9 @@ type DotsAndBoxesGame() as this =
         let scoresStr = 
             gameState.Scores 
             |> Map.toList 
-            |> List.map (fun (p, s) -> sprintf "P%d:%d" (p+1) s)
+            |> List.map (fun (p, s) -> 
+                if gameState.ExplodedPlayers.Contains p then sprintf "P%d:DEAD" (p+1)
+                else sprintf "P%d:%d" (p+1) s)
             |> String.concat " | "
             
         let status = if gameState.IsGameOver then "Game Over!" else sprintf "Turn: P%d" (gameState.CurrentTurn + 1)
@@ -342,7 +353,7 @@ type DotsAndBoxesGame() as this =
         drawNumber spriteBatch whitePixel (int color.G) (Vector2(valX, float32 startY + float32 spacing)) 20.0f 2 Color.Black
         drawNumber spriteBatch whitePixel (int color.B) (Vector2(valX, float32 startY + float32 spacing * 2.0f)) 20.0f 2 Color.Black
 
-        // Draw Buttons (Reset Removed)
+        // Draw Buttons
         let btnY = startY + spacing * 3 + 20
         let okBtn = new Rectangle(cX - 110, btnY, 100, 50)
         let cancelBtn = new Rectangle(cX + 10, btnY, 100, 50)
@@ -357,7 +368,7 @@ type DotsAndBoxesGame() as this =
     member this.DrawSettings(config: GameConfig) =
         let viewport = this.GraphicsDevice.Viewport
         let cX = viewport.Width / 2
-        let startY = viewport.Height / 2 - 150
+        let startY = viewport.Height / 2 - 180
         let getRowY index = startY + index * 70
 
         let drawControlRow index label value =
@@ -390,14 +401,18 @@ type DotsAndBoxesGame() as this =
             | "PLAYERS" ->
                 let r = new Rectangle(iconX, iconY, 20, 20)
                 this.DrawRectangle(r, Color.Blue)
+            | "MINES" ->
+                // Draw "M" icon or something
+                drawText spriteBatch whitePixel "M" (Vector2(float32 iconX, float32 iconY)) 20.0f 3 Color.Red
             | _ -> ()
 
         drawControlRow 0 "ROWS" config.Rows
         drawControlRow 1 "COLS" config.Cols
         drawControlRow 2 "PLAYERS" config.PlayerCount
+        drawControlRow 3 "MINES" config.MineCount
 
         // Draw Color Pickers
-        let colorStartY = getRowY 3 + 20
+        let colorStartY = getRowY 4 + 20
         let btnSize = 50
         let spacing = 10
         
@@ -428,12 +443,22 @@ type DotsAndBoxesGame() as this =
         this.DrawRectangle(playBtn, Color.LightGreen)
         drawSymbol spriteBatch whitePixel Play playBtn 5 Color.White
 
-    member this.DrawInGame(gameState: GameState) =
+    member this.DrawInGame(gameState: GameState, gameTime: GameTime) =
         let gridWidth = gameState.Config.Cols * gameState.Config.Spacing
         let gridHeight = gameState.Config.Rows * gameState.Config.Spacing
         let offX = (this.GraphicsDevice.Viewport.Width - gridWidth) / 2
         let offY = (this.GraphicsDevice.Viewport.Height - gridHeight) / 2
         let spacing = gameState.Config.Spacing
+        
+        // Helper for Mine Warning logic
+        let getPotentialBoxes (line: LinePosition) = 
+            match line.Orient with
+            | Horizontal -> 
+                [ { Row = line.Pos.Row; Col = line.Pos.Col }
+                  { Row = line.Pos.Row - 1; Col = line.Pos.Col } ]
+            | Vertical -> 
+                [ { Row = line.Pos.Row; Col = line.Pos.Col }
+                  { Row = line.Pos.Row; Col = line.Pos.Col - 1 } ]
         
         // 1. Boxes
         for box in gameState.Boxes do
@@ -443,9 +468,18 @@ type DotsAndBoxesGame() as this =
             let y = offY + pos.Row * spacing
             let color = gameState.Config.PlayerColors.[owner]
             let rect = new Rectangle(x + 5, y + 5, spacing - 10, spacing - 10)
-            this.DrawRectangle(rect, color * 0.5f)
+            
+            if gameState.Mines.Contains pos then
+                // Draw Exploded Box
+                this.DrawRectangle(rect, Color.DarkGray)
+                // Draw Skull
+                drawSymbol spriteBatch whitePixel Skull rect 3 Color.Red
+            else
+                this.DrawRectangle(rect, color * 0.5f)
 
         // 2. Lines
+        let time = gameTime.TotalGameTime.TotalSeconds
+        
         for line in gameState.Lines do
             let pos = line.Key
             let color = gameState.Config.PlayerColors.[line.Value]
@@ -453,12 +487,26 @@ type DotsAndBoxesGame() as this =
             let y = float32 (offY + pos.Pos.Row * spacing)
             let thick = gameState.Config.LineThickness
             
+            // Warning Check
+            let nearMine = 
+                getPotentialBoxes pos 
+                |> List.exists (fun boxPos -> 
+                    gameState.Mines.Contains boxPos && 
+                    not (gameState.Boxes.ContainsKey boxPos)) 
+            
+            let drawColor = 
+                if nearMine then
+                    // Blink faster and between Red/Yellow for visibility
+                    let t = int (time * 8.0)
+                    if t % 2 = 0 then Color.Red else Color.Yellow
+                else color
+
             if pos.Orient = Horizontal then
                 let rect = new Rectangle(int x, int (y - float32 thick / 2.0f), spacing, thick)
-                this.DrawRectangle(rect, color)
+                this.DrawRectangle(rect, drawColor)
             else
                 let rect = new Rectangle(int (x - float32 thick / 2.0f), int y, thick, spacing)
-                this.DrawRectangle(rect, color)
+                this.DrawRectangle(rect, drawColor)
 
         // 3. Dots
         for r in 0 .. gameState.Config.Rows do
@@ -475,10 +523,11 @@ type DotsAndBoxesGame() as this =
         drawSymbol spriteBatch whitePixel Back backBtn 4 Color.White
         
         // 5. Current Turn Indicator
-        let turnColor = gameState.Config.PlayerColors.[gameState.CurrentTurn]
-        let turnRect = new Rectangle(this.GraphicsDevice.Viewport.Width - 70, 20, 50, 50)
-        this.DrawRectangle(turnRect, turnColor)
-        drawNumber spriteBatch whitePixel (gameState.CurrentTurn + 1) (Vector2(float32 turnRect.X + 15.0f, float32 turnRect.Y + 10.0f)) 20.0f 3 Color.White
+        if not gameState.IsGameOver then
+            let turnColor = gameState.Config.PlayerColors.[gameState.CurrentTurn]
+            let turnRect = new Rectangle(this.GraphicsDevice.Viewport.Width - 70, 20, 50, 50)
+            this.DrawRectangle(turnRect, turnColor)
+            drawNumber spriteBatch whitePixel (gameState.CurrentTurn + 1) (Vector2(float32 turnRect.X + 15.0f, float32 turnRect.Y + 10.0f)) 20.0f 3 Color.White
 
 
         // 6. Game Over Overlay
@@ -514,7 +563,7 @@ type DotsAndBoxesGame() as this =
         match currentScreen with
         | Settings config -> this.DrawSettings(config)
         | ColorPicker (pid, color, config) -> this.DrawColorPicker(pid, color)
-        | InGame gameState -> this.DrawInGame(gameState)
+        | InGame gameState -> this.DrawInGame(gameState, gameTime)
         | _ -> ()
         
         spriteBatch.End()
