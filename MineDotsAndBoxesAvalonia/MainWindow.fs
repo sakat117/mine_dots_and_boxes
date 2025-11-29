@@ -114,12 +114,16 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
 
     | StartGame ->
         match model.Screen with
-        | Settings config -> { model with Screen = InGame (initGame config) }, Cmd.none
+        | Settings config ->
+            // Start game and trigger blink loop
+            { model with Screen = InGame (initGame config) }, Cmd.ofMsg BlinkTick
         | _ -> model, Cmd.none
 
     | RestartGame ->
         match model.Screen with
-        | InGame gameState -> { model with Screen = InGame (initGame gameState.Config) }, Cmd.none
+        | InGame gameState ->
+            // Restart and trigger blink loop
+            { model with Screen = InGame (initGame gameState.Config) }, Cmd.ofMsg BlinkTick
         | _ -> model, Cmd.none
         
     | PlaceLine linePos ->
@@ -130,7 +134,23 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         | _ -> model, Cmd.none
         
     | BlinkTick ->
-        { model with BlinkState = not model.BlinkState }, Cmd.none
+        let newModel = { model with BlinkState = not model.BlinkState }
+        
+        // Continue loop if in game and not over
+        let shouldContinue = 
+            match newModel.Screen with
+            | InGame state -> not state.IsGameOver
+            | _ -> false
+            
+        if shouldContinue then
+            newModel, Cmd.ofEffect (fun dispatch ->
+                async {
+                    do! Async.Sleep 100
+                    dispatch BlinkTick
+                } |> Async.StartImmediate
+            )
+        else
+            newModel, Cmd.none
         
     | SetColor pid ->
         match model.Screen with
