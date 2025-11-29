@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -6,9 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Domain.fs" />
-    <Compile Include="GameLogic.fs" />
-    <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -18,6 +15,7 @@
     <PackageReference Include="Avalonia.FuncUI" Version="1.5.2" />
     <PackageReference Include="Avalonia.FuncUI.Elmish" Version="1.5.2" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.9" />
+    <PackageReference Include="Elmish" Version="4.3.0" />
   </ItemGroup>
 
 </Project>

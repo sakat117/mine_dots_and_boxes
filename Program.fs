@@ -1,20 +1,30 @@
-module MineDotsAndBoxesAvalonia.MainWindow
+module MineDotsAndBoxesAvalonia.Program
 
+open System
 open Avalonia
 open Avalonia.Controls
+open Avalonia.Controls.ApplicationLifetimes
 open Avalonia.Controls.Primitives
 open Avalonia.Controls.Shapes
+open Avalonia.FuncUI
 open Avalonia.FuncUI.DSL
+open Avalonia.FuncUI.Hosts
 open Avalonia.FuncUI.Types
 open Avalonia.Layout
 open Avalonia.Media
+open Avalonia.Themes.Fluent
 open Avalonia.Threading
-open Elmish
-open System
-open MineDotsAndBoxesAvalonia.Domain
-open MineDotsAndBoxesAvalonia.GameLogic
+// open Elmish -- Removed to avoid ambiguity
 
-// --- Constants ---
+// Use aliases to avoid ambiguity
+module ElmishProgram = Elmish.Program
+type Cmd<'msg> = Elmish.Cmd<'msg>
+module Cmd = Elmish.Cmd
+
+// ==========================================================================================
+// 1. DOMAIN (Types & Constants)
+// ==========================================================================================
+
 let availableColors = [|
     Colors.Blue; Colors.Red; Colors.Green; Colors.Orange;
     Colors.Purple; Colors.Cyan; Colors.Yellow; Colors.Black;
@@ -22,34 +32,222 @@ let availableColors = [|
     Colors.Pink; Colors.Gray
 |]
 
-// --- Model (State) ---
+type GamePlayerIndex = int 
+
+type GameOrientation = 
+    | Horizontal 
+    | Vertical
+
+type Position = { Row: int; Col: int }
+
+type LinePosition = { Pos: Position; Orient: GameOrientation }
+
+type GameConfig = {
+    Rows: int
+    Cols: int
+    PlayerCount: int
+    MineCount: int
+    PlayerColors: Color[]
+    LineThickness: double
+    DotRadius: double
+    Spacing: double
+}
+
+type GameState = {
+    Config: GameConfig
+    Lines: Map<LinePosition, GamePlayerIndex>
+    Boxes: Map<Position, GamePlayerIndex>
+    Mines: Set<Position>
+    ExplodedPlayers: Set<GamePlayerIndex>
+    CurrentTurn: GamePlayerIndex
+    Scores: Map<GamePlayerIndex, int>
+    IsGameOver: bool
+    Winner: GamePlayerIndex option
+}
+
+type Screen =
+    | MainMenu
+    | InGame of GameState
+    | Settings of GameConfig
+    | ColorPicker of targetPlayer: int * editingColor: Color * returnConfig: GameConfig
+
+// ==========================================================================================
+// 2. GAME LOGIC (Pure Functions)
+// ==========================================================================================
+
+let getNextPlayer (current: GamePlayerIndex) (totalPlayers: int) (exploded: Set<GamePlayerIndex>) =
+    let rec findNext p =
+        let next = (p + 1) % totalPlayers
+        if next = current then None 
+        elif exploded.Contains next then findNext next
+        else Some next
+    
+    match findNext current with
+    | Some p -> p
+    | None -> current 
+
+let initGame (config: GameConfig) : GameState =
+    let initialScores = 
+        [0 .. config.PlayerCount - 1] 
+        |> List.map (fun p -> (p, 0)) 
+        |> Map.ofList
+
+    let rnd = Random()
+    let totalBoxes = config.Rows * config.Cols
+    let allPositions = 
+        [ for r in 0 .. config.Rows - 1 do
+            for c in 0 .. config.Cols - 1 do
+                yield { Row = r; Col = c } ]
+    
+    let mines = 
+        allPositions
+        |> List.sortBy (fun _ -> rnd.Next())
+        |> List.take (Math.Min(config.MineCount, totalBoxes))
+        |> Set.ofList
+
+    {
+        Config = config
+        Lines = Map.empty
+        Boxes = Map.empty
+        Mines = mines
+        ExplodedPlayers = Set.empty
+        CurrentTurn = 0 
+        Scores = initialScores
+        IsGameOver = false
+        Winner = None
+    }
+
+let getBoxEdges (pos: Position) : LinePosition list =
+    [
+        { Pos = pos; Orient = Horizontal }
+        { Pos = { pos with Row = pos.Row + 1 }; Orient = Horizontal }
+        { Pos = pos; Orient = Vertical }
+        { Pos = { pos with Col = pos.Col + 1 }; Orient = Vertical }
+    ]
+
+let isBoxCompleted (lines: Map<LinePosition, GamePlayerIndex>) (pos: Position) : bool =
+    let edges = getBoxEdges pos
+    edges |> List.forall (fun edge -> lines.ContainsKey edge)
+
+let findNewlyCompletedBoxes (lines: Map<LinePosition, GamePlayerIndex>) (newLine: LinePosition) (rows: int) (cols: int) : Position list =
+    let potentialBoxes = 
+        match newLine.Orient with
+        | Horizontal -> 
+            [ 
+                { Row = newLine.Pos.Row; Col = newLine.Pos.Col }
+                { Row = newLine.Pos.Row - 1; Col = newLine.Pos.Col }
+            ]
+        | Vertical -> 
+            [ 
+                { Row = newLine.Pos.Row; Col = newLine.Pos.Col }
+                { Row = newLine.Pos.Row; Col = newLine.Pos.Col - 1 }
+            ]
+    
+    potentialBoxes
+    |> List.filter (fun p -> p.Row >= 0 && p.Row < rows && p.Col >= 0 && p.Col < cols)
+    |> List.filter (fun p -> isBoxCompleted lines p)
+
+let updateGameStatus (state: GameState) : GameState =
+    let survivors = 
+        [0 .. state.Config.PlayerCount - 1]
+        |> List.filter (fun p -> not (state.ExplodedPlayers.Contains p))
+        
+    let newScores = 
+        [0 .. state.Config.PlayerCount - 1]
+        |> List.map (fun pid -> 
+            let score = state.Boxes |> Map.filter (fun _ owner -> owner = pid) |> Map.count
+            (pid, score))
+        |> Map.ofList
+    
+    let totalBoxes = state.Config.Rows * state.Config.Cols
+    let currentTotalScore = newScores |> Map.fold (fun acc _ s -> acc + s) 0
+    
+    let survivorCount = survivors.Length
+    let isLastManStanding = state.Config.PlayerCount > 1 && survivorCount <= 1
+    let allBoxesFilled = currentTotalScore = totalBoxes 
+    
+    let isOver = allBoxesFilled || isLastManStanding || survivorCount = 0
+
+    let winner = 
+        if isOver then
+            if survivorCount = 1 then 
+                Some survivors.Head
+            elif survivorCount = 0 then
+                None 
+            else
+                newScores 
+                |> Map.toList 
+                |> List.filter (fun (p, _) -> not (state.ExplodedPlayers.Contains p))
+                |> List.sortByDescending snd
+                |> List.tryHead
+                |> Option.map fst
+        else None
+
+    { state with 
+        Scores = newScores
+        IsGameOver = isOver
+        Winner = winner }
+
+let tryPlaceLine (state: GameState) (linePos: LinePosition) : GameState =
+    if state.IsGameOver || state.Lines.ContainsKey linePos then
+        state
+    else
+        let newLines = Map.add linePos state.CurrentTurn state.Lines
+        let newBoxesList = findNewlyCompletedBoxes newLines linePos state.Config.Rows state.Config.Cols
+        let boxesCompleted = not newBoxesList.IsEmpty
+        let triggeredMines = newBoxesList |> List.exists (fun p -> state.Mines.Contains p)
+            
+        let mutable currentExploded = state.ExplodedPlayers
+        if triggeredMines then
+            currentExploded <- currentExploded.Add state.CurrentTurn
+        
+        let newBoxes = 
+            newBoxesList 
+            |> List.fold (fun acc boxPos -> Map.add boxPos state.CurrentTurn acc) state.Boxes
+
+        let nextPlayer = 
+            if triggeredMines then 
+                getNextPlayer state.CurrentTurn state.Config.PlayerCount currentExploded
+            elif boxesCompleted then 
+                state.CurrentTurn 
+            else 
+                getNextPlayer state.CurrentTurn state.Config.PlayerCount currentExploded
+
+        let newState = { state with 
+                            Lines = newLines
+                            Boxes = newBoxes
+                            ExplodedPlayers = currentExploded
+                            CurrentTurn = nextPlayer }
+        
+        updateGameStatus newState
+
+// ==========================================================================================
+// 3. APP MODEL & UPDATE
+// ==========================================================================================
+
 type Model = {
     Screen: Screen
     BlinkState: bool
 }
 
-// --- Msg (Events) ---
 type Msg =
     | GoToSettings of GameConfig
     | GoToInGame of GameState
-    | GoToColorPicker of int * Color // Config removed
+    | GoToColorPicker of int * Color
     | UpdateConfig of GameConfig
     | StartGame 
     | RestartGame
     | PlaceLine of LinePosition
     | BlinkTick
-    | SetColor of int // Color comes from state
-    // Granular config updates
+    | SetColor of int
     | IncRows | DecRows
     | IncCols | DecCols
     | IncPlayers | DecPlayers
     | IncMines | DecMines
-    // Color Updates
     | UpdateColorR of byte
     | UpdateColorG of byte
     | UpdateColorB of byte
 
-// --- Init ---
 let init () =
     let baseConfig = {
         Rows = 3
@@ -66,14 +264,12 @@ let init () =
         BlinkState = false 
     }, Cmd.none
 
-// --- Update ---
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     let updateSettings f =
         match model.Screen with
         | Settings config -> { model with Screen = Settings (f config) }, Cmd.none
         | _ -> model, Cmd.none
 
-    // Helper to update color in ColorPicker screen
     let updatePickerColor f =
         match model.Screen with
         | ColorPicker (pid, c, conf) -> 
@@ -90,10 +286,8 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | GoToColorPicker (pid, color) ->
         match model.Screen with
         | Settings config -> 
-            // Transition from Settings: use current config
             { model with Screen = ColorPicker(pid, color, config) }, Cmd.none
         | ColorPicker (_, _, config) ->
-            // Internal update in ColorPicker: keep existing config
             { model with Screen = ColorPicker(pid, color, config) }, Cmd.none
         | _ -> model, Cmd.none
         
@@ -115,15 +309,23 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | StartGame ->
         match model.Screen with
         | Settings config ->
-            // Start game and trigger blink loop
-            { model with Screen = InGame (initGame config) }, Cmd.ofMsg BlinkTick
+            { model with Screen = InGame (initGame config) }, Cmd.ofEffect (fun dispatch ->
+                async {
+                    do! Async.Sleep 100
+                    dispatch BlinkTick
+                } |> Async.StartImmediate
+            )
         | _ -> model, Cmd.none
 
     | RestartGame ->
         match model.Screen with
         | InGame gameState ->
-            // Restart and trigger blink loop
-            { model with Screen = InGame (initGame gameState.Config) }, Cmd.ofMsg BlinkTick
+            { model with Screen = InGame (initGame gameState.Config) }, Cmd.ofEffect (fun dispatch ->
+                async {
+                    do! Async.Sleep 100
+                    dispatch BlinkTick
+                } |> Async.StartImmediate
+            )
         | _ -> model, Cmd.none
         
     | PlaceLine linePos ->
@@ -135,8 +337,6 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         
     | BlinkTick ->
         let newModel = { model with BlinkState = not model.BlinkState }
-        
-        // Continue loop if in game and not over
         let shouldContinue = 
             match newModel.Screen with
             | InGame state -> not state.IsGameOver
@@ -161,10 +361,10 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             { model with Screen = Settings newConfig }, Cmd.none
         | _ -> model, Cmd.none
 
-// --- Subscriptions ---
-let timerSub (model: Model) = Cmd.none
+// ==========================================================================================
+// 4. VIEW
+// ==========================================================================================
 
-// --- View ---
 let view (model: Model) (dispatch: Msg -> unit) =
     let getPlayerBrush (colors: Color[]) (pid: int) =
         new SolidColorBrush(colors.[pid])
@@ -600,7 +800,7 @@ let view (model: Model) (dispatch: Msg -> unit) =
                                                         Button.horizontalAlignment HorizontalAlignment.Center
                                                         Button.margin 20.0
                                                         Button.fontSize 20.0
-                                                        Button.onClick (fun _ -> dispatch StartGame)
+                                                        Button.onClick (fun _ -> dispatch RestartGame)
                                                     ]
                                                 ]
                                             ]
@@ -618,3 +818,39 @@ let view (model: Model) (dispatch: Msg -> unit) =
     | ColorPicker (p, c, conf) -> colorPickerView p c conf :> IView
     | InGame gameState -> inGameView gameState :> IView
     | MainMenu -> TextBlock.create [ TextBlock.text "Menu" ] :> IView
+
+// ==========================================================================================
+// 5. APP ENTRY
+// ==========================================================================================
+
+type MainWindow() as this =
+    inherit HostWindow()
+    do
+        base.Title <- "Mine Dots and Boxes (Avalonia)"
+        base.Width <- 800.0
+        base.Height <- 800.0
+        
+        ElmishProgram.mkProgram init update view
+        |> Avalonia.FuncUI.Elmish.Program.withHost this
+        |> ElmishProgram.run
+
+type App() =
+    inherit Application()
+
+    override this.Initialize() =
+        this.Styles.Add (FluentTheme())
+        this.RequestedThemeVariant <- Styling.ThemeVariant.Light
+
+    override this.OnFrameworkInitializationCompleted() =
+        match this.ApplicationLifetime with
+        | :? IClassicDesktopStyleApplicationLifetime as desktopLifetime ->
+            desktopLifetime.MainWindow <- MainWindow()
+        | _ -> ()
+
+[<EntryPoint>]
+let main(args: string[]) =
+    AppBuilder
+        .Configure<App>()
+        .UsePlatformDetect()
+        .UseSkia()
+        .StartWithClassicDesktopLifetime(args)
